@@ -1,0 +1,76 @@
+# ============================================================
+# GitHub Actions — workflow de démonstration
+# Fichier(s) dans le dossier : .github/workflows/*.yml
+# ============================================================
+
+name: CI
+
+# 1) Déclencheurs (événements GitHub)
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:               # bouton « Run workflow » manuel
+
+# 2) Variables globales
+env:
+  APP_NAME: demo-ci
+
+jobs:
+  # ---------- LINT ----------
+  lint:
+    runs-on: ubuntu-latest         # machine virtuelle fournie par GitHub
+    steps:
+      - uses: actions/checkout@v4  # il faut récupérer le code explicitement
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: flake8 app tests
+
+  # ---------- TEST (matrice de versions Python) ----------
+  test:
+    needs: lint                    # l'ordre se définit par dépendances
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pytest -v
+
+  # ---------- BUILD ----------
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p dist
+          tar czf dist/$APP_NAME.tar.gz app
+      - uses: actions/upload-artifact@v4   # artefacts = action explicite
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  # ---------- DEPLOY (seulement sur main, avec environnement) ----------
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production        # approbation manuelle configurable dans Settings > Environments
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - run: |
+          echo "Déploiement de $APP_NAME (commit ${GITHUB_SHA::7})…"
+          ls -l dist/

@@ -1,0 +1,73 @@
+# ============================================================
+# GitLab CI/CD — pipeline de démonstration
+# Fichier unique à la racine du dépôt : .gitlab-ci.yml
+# ============================================================
+
+# 1) Les étapes s'exécutent dans cet ordre.
+#    Les jobs d'une même étape tournent en parallèle.
+stages:
+  - lint
+  - test
+  - build
+  - deploy
+
+# 2) Valeurs par défaut pour tous les jobs
+default:
+  image: python:3.12-slim          # chaque job tourne dans un conteneur Docker
+  before_script:
+    - pip install -r requirements.txt
+
+# 3) Variables globales
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  APP_NAME: "demo-ci"
+
+# Cache partagé entre les pipelines (accélère pip install)
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .cache/pip
+
+# ---------- Étape LINT ----------
+lint:
+  stage: lint
+  script:
+    - flake8 app tests
+
+# ---------- Étape TEST (matrice de versions Python) ----------
+test:
+  stage: test
+  image: python:${PYTHON_VERSION}-slim
+  parallel:
+    matrix:
+      - PYTHON_VERSION: ["3.11", "3.12"]
+  script:
+    - pytest -v --junitxml=report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml            # résultats affichés dans la Merge Request
+
+# ---------- Étape BUILD ----------
+build:
+  stage: build
+  script:
+    - mkdir -p dist
+    - tar czf dist/$APP_NAME.tar.gz app
+  artifacts:
+    paths:
+      - dist/                      # transmis automatiquement aux étapes suivantes
+    expire_in: 1 week
+
+# ---------- Étape DEPLOY (manuel, seulement sur main) ----------
+deploy:
+  stage: deploy
+  before_script: []                # pas besoin d'installer les dépendances ici
+  script:
+    - echo "Déploiement de $APP_NAME (commit $CI_COMMIT_SHORT_SHA)…"
+    - ls -l dist/
+  environment:
+    name: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual                 # bouton ▶ à cliquer dans l'interface
